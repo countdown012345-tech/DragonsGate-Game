@@ -1,0 +1,12 @@
+
+*.db
+*.pid
+server/logs/*
+__pycache__/*
+.evennia/*
+
+*.db
+*.pid
+server/logs/*
+__pycache__/*
+.evennia/*
