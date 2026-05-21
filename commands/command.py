@@ -32,7 +32,114 @@ class Command(BaseCommand):
     #
     pass
 
+def get_stat_description(value):
+    """Translates a raw number (1-20) into your game's text adjectives."""
+    if value is None: return "unknown"
+    if value <= 4:  return "terrible"
+    if value <= 6:  return "poor"
+    if value <= 8:  return "slightly below average"
+    if value == 9:  return "average"
+    if value == 11: return "slightly above average"
+    if value == 12: return "good"
+    if value <= 14: return "very good"
+    if value <= 15: return "great"
+    if value <= 16: return "remarkable"
+    return "outstanding"
 
+class CmdStats(Command):
+    """
+    View your character's background, physical attributes, and stats.
+
+    Usage:
+      stats
+    """
+    key = "stats"
+    aliases = ["sheet", "score"]
+    lock = "cmd:all()"
+
+    def func(self):
+        caller = self.caller
+        
+        # Pull values safely with fallbacks if an attribute isn't set yet
+        name = caller.db.full_name or caller.key
+        homeland = caller.db.homeland or "Unknown"
+        marital = caller.db.marital_status or "Single"
+        citizenship = caller.db.citizenship or "None"
+        social = caller.db.social_standing or "Citizen"
+        popularity = caller.db.popularity or 0
+        age = caller.db.age or 18
+
+        height = caller.db.height or "5'10\""
+        weight = caller.db.weight or 150
+        handed = caller.db.handed or "Right"
+        eyes = caller.db.eyes or "brown"
+        hair = caller.db.hair or "brown"
+        complexion = caller.db.complexion or "fair"
+
+        hp = caller.db.hp or 100
+        hp_max = caller.db.hp_max or 100
+        fatigue = caller.db.fatigue_pct or 0
+        state = caller.db.state or "conscious"
+        load = caller.db.load_lbs or 0
+        encumbrance = caller.db.encumbrance or "You are unencumbered."
+        position = caller.db.position or "standing"
+
+        # Build the descriptive text mappings from numbers
+        agility_desc = get_stat_description(caller.db.agility)
+        appearance_desc = get_stat_description(caller.db.appearance)
+        charisma_desc = get_stat_description(caller.db.charisma)
+        dexterity_desc = get_stat_description(caller.db.dexterity)
+        empathy_desc = get_stat_description(caller.db.empathy)
+        endurance_desc = get_stat_description(caller.db.endurance)
+        judgement_desc = get_stat_description(caller.db.judgement)
+        memory_desc = get_stat_description(caller.db.memory)
+        perception_desc = get_stat_description(caller.db.perception)
+        reasoning_desc = get_stat_description(caller.db.reasoning)
+        speed_desc = get_stat_description(caller.db.speed)
+        strength_desc = get_stat_description(caller.db.strength)
+        willpower_desc = get_stat_description(caller.db.willpower)
+
+        # Format the block exactly to match your visual spacing rules
+        sheet = f"""Character Sheet for {caller.key}
+_____________________________________________________
+
+Character Background
+
+Name: {name:<30} Homeland: {homeland}
+Marital Status: {marital:<22}
+Citizenship Status: {citizenship:<20} Social Standing: {social}
+Popularity:  {popularity}
+
+Age: {age}
+
+Physical Characteristics
+
+Height: {height:<10} Weight: {weight} lbs.    Handed: {handed}
+Eyes: {eyes:<12} Hair: {hair:<12} Complexion: {complexion}
+
+Health Points: {hp}/{hp_max:<10} Fatigue: {fatigue}%        State: {state}
+
+Load: {load} lbs.
+Encumbrance: {encumbrance}
+
+Position: {position}
+
+Attributes:
+Agility:    {agility_desc:<22} Appearance: {appearance_desc}
+Charisma:   {charisma_desc:<22} Dexterity:  {dexterity_desc}
+Empathy:    {empathy_desc:<22} Endurance:  {endurance_desc}
+Judgement:  {judgement_desc:<22} Memory:     {memory_desc}
+Perception: {perception_desc:<22} Reasoning:  {reasoning_desc}
+Speed:      {speed_desc:<22} Strength:   {strength_desc}
+Willpower:  {willpower_desc}
+
+To see a list of skills and actions your character knows, type: skills
+
+_____________________________________________________
+
+"""
+
+        caller.msg(sheet)
 # -------------------------------------------------------------
 #
 # The default commands inherit from

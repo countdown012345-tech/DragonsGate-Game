@@ -15,7 +15,73 @@ own cmdsets by inheriting from them or directly from `evennia.CmdSet`.
 """
 
 from evennia import default_cmds
+from evennia import Command
+from evennia import CmdSet
+from commands.command import CmdStats
 
+
+# =====================================================================
+# DRAGONSGATE COMBAT QUEUE COMMAND ENGINE
+# =====================================================================
+
+class CmdCombatAction(Command):
+    """
+    Queue an attack profile against a specific target.
+
+    Usage:
+      stab <target>
+      slash <target>
+    """
+    key = "stab"
+    aliases = ["slash"]
+    help_category = "Combat"
+
+    def func(self):
+        caller = self.caller
+        action_type = self.cmdstring  # Dynamically parses if user typed 'stab' or 'slash'
+        
+        if not self.args:
+            caller.msg(f"Who do you want to {action_type}?")
+            return
+            
+        target = caller.search(self.args.strip())
+        if not target:
+            return
+
+        caller.queue_action(action_type, target)
+
+
+class CmdEquip(Command):
+    """
+    Wield a structural weapon from your local inventory bag.
+
+    Usage:
+      equip <weapon>
+    """
+    key = "equip"
+    help_category = "Combat"
+
+    def func(self):
+        caller = self.caller
+        if not self.args:
+            caller.msg("Equip what?")
+            return
+            
+        obj = caller.search(self.args.strip(), location=caller)
+        if not obj:
+            return
+            
+        if not hasattr(obj, "db") or obj.db.speed_cost is None:
+            caller.msg("You cannot equip that asset as a functional weapon.")
+            return
+
+        caller.db.slots["main_hand"] = obj
+        caller.msg(f"You equip {obj.key} as your main weapon. (Speed Cost: {obj.db.speed_cost} ticks)")
+
+
+# =====================================================================
+# CORE EVENNIA CMDSETS (OVERLOADED FOR DRAGONSGATE)
+# =====================================================================
 
 class CharacterCmdSet(default_cmds.CharacterCmdSet):
     """
@@ -31,9 +97,13 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         Populates the cmdset
         """
         super().at_cmdset_creation()
-        #
-        # any commands you add below will overload the default ones.
-        #
+        
+        # Add DragonsGate combat system triggers
+        self.add(CmdCombatAction())
+        self.add(CmdEquip())
+        
+        # Add the classic text-adjective sheet command
+        self.add(CmdStats())
 
 
 class AccountCmdSet(default_cmds.AccountCmdSet):
@@ -51,9 +121,7 @@ class AccountCmdSet(default_cmds.AccountCmdSet):
         Populates the cmdset
         """
         super().at_cmdset_creation()
-        #
-        # any commands you add below will overload the default ones.
-        #
+        # Any commands you add below will overload the default ones.
 
 
 class UnloggedinCmdSet(default_cmds.UnloggedinCmdSet):
@@ -69,9 +137,7 @@ class UnloggedinCmdSet(default_cmds.UnloggedinCmdSet):
         Populates the cmdset
         """
         super().at_cmdset_creation()
-        #
-        # any commands you add below will overload the default ones.
-        #
+        # Any commands you add below will overload the default ones.
 
 
 class SessionCmdSet(default_cmds.SessionCmdSet):
@@ -86,11 +152,6 @@ class SessionCmdSet(default_cmds.SessionCmdSet):
         """
         This is the only method defined in a cmdset, called during
         its creation. It should populate the set with command instances.
-
-        As and example we just add the empty base `Command` object.
-        It prints some info.
         """
         super().at_cmdset_creation()
-        #
-        # any commands you add below will overload the default ones.
-        #
+        # Any commands you add below will overload the default ones.
