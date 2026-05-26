@@ -1,45 +1,119 @@
 """
-Command sets
-
-All commands in the game must be grouped in a cmdset.  A given command
-can be part of any number of cmdsets and cmdsets can be added/removed
-and merged onto entities at runtime.
-
-To create new commands to populate the cmdset, see
-`commands/command.py`.
-
-This module wraps the default command sets of Evennia; overloads them
-to add/remove commands from the default lineup. You can create your
-own cmdsets by inheriting from them or directly from `evennia.CmdSet`.
-
+Command sets for DragonsGate.
+Includes structural validation mechanics for specialized asymmetrical weapon combat commands.
 """
 
 from evennia import default_cmds
 from evennia import Command
 from evennia import CmdSet
-from commands.command import CmdStats
+from commands.command import CmdStats, CmdQueue, CmdStop  # Ensure CmdQueue is imported from your command.py
+from commands.worldbuilder import CmdWorldbuilder
+from commands.cmd_door import CmdOpen, CmdClose
+class GameMasterCmdSet(CmdSet):
+    """Command set for GameMasters."""
+    key = "GameMasterCmdSet"
+    priority = 110
+    mergetype = "Union"
 
+    def at_cmdset_creation(self):
+        self.add(CmdWorldbuilder)
+        self.add(CmdOpen)
+        self.add(CmdClose)
+
+# Placeholder for future command sets
+class StorytellerCmdSet(CmdSet):
+    key = "StorytellerCmdSet"
+    priority = 100
+    mergetype = "Union"
+    def at_cmdset_creation(self):
+        pass
+
+class WelcomeAreaCmdSet(CmdSet):
+    key = "WelcomeAreaCmdSet"
+    priority = 90
+    mergetype = "Union"
+    def at_cmdset_creation(self):
+        pass
+
+class PlayerCharacterCmdSet(CmdSet):
+    key = "PlayerCharacterCmdSet"
+    priority = 80
+    mergetype = "Union"
+    def at_cmdset_creation(self):
+        pass
+from evennia.contrib.grid.xyzgrid.commands import XYZGridCmdSet
+
+class CharacterCmdSet(default_cmds.CharacterCmdSet):
+    def at_cmdset_creation(self):
+        super().at_cmdset_creation()
+        self.add(XYZGridCmdSet)
+        self.add(CmdWorldbuilder)
+        self.add(CmdOpen)
+        self.add(CmdClose)
 
 # =====================================================================
-# DRAGONSGATE COMBAT QUEUE COMMAND ENGINE
+# DRAGONSGATE COMBAT QUEUE COMMAND ENGINE WITH VALIDATION
 # =====================================================================
 
 class CmdCombatAction(Command):
     """
-    Queue an attack profile against a specific target.
+    Queue a specialized weapon combat attack against a specific target.
+    
+    Valid weapon groupings required:
+      Knives              -> stab, slash
+      One Handed Crushing -> bash, smash
+      Unarmed             -> (None yet)
 
     Usage:
       stab <target>
       slash <target>
+      bash <target>
+      smash <target>
     """
+    # Registered attack trigger keywords
     key = "stab"
-    aliases = ["slash"]
+    aliases = ["slash", "bash", "smash"]
     help_category = "Combat"
 
     def func(self):
         caller = self.caller
-        action_type = self.cmdstring  # Dynamically parses if user typed 'stab' or 'slash'
         
+        # 1. Roundtime/Busy Check
+        cooldown = caller.attributes.get("combat_cooldown") or 0
+        if cooldown > 0:
+            caller.msg(f"|rYou are still recovering (busy for {cooldown} more second(s)).|n")
+            return
+
+        action_type = self.cmdstring.lower()
+        
+        # 2. Look up equipped status parameters
+        weapon = caller.db.slots.get("main_hand")
+        weapon_type = "Unarmed"
+        
+        if weapon and hasattr(weapon, "db") and weapon.db.weapon_type:
+            weapon_type = weapon.db.weapon_type
+
+        # 3. Strict Weapon Validation Matrices
+        if weapon_type == "Unarmed":
+            caller.msg(f"You cannot '{action_type}' while completely barehanded.")
+            return
+
+        if weapon_type == "Knives":
+            if action_type not in ["stab", "slash"]:
+                caller.msg(f"You cannot '{action_type}' with a knife! Try: stab, slash.")
+                return
+
+        elif weapon_type == "One Handed Crushing":
+            if action_type not in ["bash", "smash"]:
+                caller.msg(f"You cannot '{action_type}' with a blunt crushing weapon! Try: bash, smash.")
+                return
+        
+        else:
+            # Catch-all failsafe for unmapped future weapon types
+            caller.msg("Your current weapon does not support that specialized attack move.")
+            return
+
+        # 4. Standard parsing loop for finding your local target combatant
         if not self.args:
             caller.msg(f"Who do you want to {action_type}?")
             return
@@ -48,12 +122,13 @@ class CmdCombatAction(Command):
         if not target:
             return
 
+        # Success! Enqueue valid combat attack
         caller.queue_action(action_type, target)
 
 
 class CmdEquip(Command):
     """
-    Wield a structural weapon from your local inventory bag.
+    Wield an item from your inventory bag as your main functional weapon asset.
 
     Usage:
       equip <weapon>
@@ -75,83 +150,52 @@ class CmdEquip(Command):
             caller.msg("You cannot equip that asset as a functional weapon.")
             return
 
+        # Set main hand tracking pointer
         caller.db.slots["main_hand"] = obj
-        caller.msg(f"You equip {obj.key} as your main weapon. (Speed Cost: {obj.db.speed_cost} ticks)")
+        
+        # Pull category name safely for user feedback text formatting
+        w_type = obj.db.weapon_type or "Unknown"
+        caller.msg(f"You equip {obj.key} as your main weapon. ({w_type} - Speed: {obj.db.speed_cost} ticks)")
 
 
 # =====================================================================
-# CORE EVENNIA CMDSETS (OVERLOADED FOR DRAGONSGATE)
+# CORE EVENNIA CMDSETS
 # =====================================================================
 
 class CharacterCmdSet(default_cmds.CharacterCmdSet):
     """
-    The `CharacterCmdSet` contains general in-game commands like `look`,
-    `get`, etc available on in-game Character objects. It is merged with
-    the `AccountCmdSet` when an Account puppets a Character.
+    The CharacterCmdSet contains general in-game commands like look, get, etc.
     """
-
     key = "DefaultCharacter"
 
     def at_cmdset_creation(self):
-        """
-        Populates the cmdset
-        """
         super().at_cmdset_creation()
         
-        # Add DragonsGate combat system triggers
+        # Add validated multi-move fighting actions
         self.add(CmdCombatAction())
         self.add(CmdEquip())
         
-        # Add the classic text-adjective sheet command
+        # Add the classic sheet overview command
         self.add(CmdStats())
+        
+        # Add the new sequence queuing command
+        self.add(CmdQueue())
+        self.add(CmdStop())
 
 
 class AccountCmdSet(default_cmds.AccountCmdSet):
-    """
-    This is the cmdset available to the Account at all times. It is
-    combined with the `CharacterCmdSet` when the Account puppets a
-    Character. It holds game-account-specific commands, channel
-    commands, etc.
-    """
-
     key = "DefaultAccount"
-
     def at_cmdset_creation(self):
-        """
-        Populates the cmdset
-        """
         super().at_cmdset_creation()
-        # Any commands you add below will overload the default ones.
 
 
 class UnloggedinCmdSet(default_cmds.UnloggedinCmdSet):
-    """
-    Command set available to the Session before being logged in.  This
-    holds commands like creating a new account, logging in, etc.
-    """
-
     key = "DefaultUnloggedin"
-
     def at_cmdset_creation(self):
-        """
-        Populates the cmdset
-        """
         super().at_cmdset_creation()
-        # Any commands you add below will overload the default ones.
 
 
 class SessionCmdSet(default_cmds.SessionCmdSet):
-    """
-    This cmdset is made available on Session level once logged in. It
-    is empty by default.
-    """
-
     key = "DefaultSession"
-
     def at_cmdset_creation(self):
-        """
-        This is the only method defined in a cmdset, called during
-        its creation. It should populate the set with command instances.
-        """
         super().at_cmdset_creation()
-        # Any commands you add below will overload the default ones.

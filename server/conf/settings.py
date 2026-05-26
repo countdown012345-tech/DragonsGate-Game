@@ -42,3 +42,11 @@ try:
     from server.conf.secret_settings import *
 except ImportError:
     print("secret_settings.py file not found or failed to import.")
+
+# Add this to your settings.py
+EXTRA_LAUNCHER_COMMANDS = {
+    "xyzgrid": "evennia.contrib.grid.xyzgrid.launchcmd.xyzcommand"
+}
+
+# Ensure prototypes are enabled
+PROTOTYPE_MODULES += ["evennia.contrib.grid.xyzgrid.prototypes"]

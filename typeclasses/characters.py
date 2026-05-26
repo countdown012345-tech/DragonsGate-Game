@@ -1,4 +1,7 @@
 from evennia import DefaultCharacter
+import random
+
+from commands.default_cmdsets import GameMasterCmdSet
 
 class Character(DefaultCharacter):
     """
@@ -7,8 +10,14 @@ class Character(DefaultCharacter):
     and processes the combat action queue.
     """
     def at_object_creation(self):
-        """Called once when a character is first created in the database."""
         super().at_object_creation()
+
+    def at_cmdset_get(self, **kwargs):
+        super().at_cmdset_get(**kwargs)
+        # Add GameMasterCmdSet if the character has the Gamemaster permission
+        if self.locks.check_lockstring(self, "perm(Gamemaster)"):
+            self.cmdset.add(GameMasterCmdSet, permanent=True)
+        # Add other command sets here as needed for Storyteller, WelcomeArea, PlayerCharacter, etc.
         
         # 1. Character Background
         self.db.full_name = self.key
@@ -21,36 +30,24 @@ class Character(DefaultCharacter):
 
         # 2. Physical Characteristics
         self.db.height = "6' 6\""
-        self.db.weight = 197  # Numeric so we can calculate encumbrance or health modifications
+        self.db.weight = 197
         self.db.handed = "Right"
         self.db.eyes = "steel"
         self.db.hair = "coal-black"
         self.db.complexion = "tan"
 
-        # 3. Attributes (Expanded List)
-        # Using numeric values internally (1-20+ baseline) so calculations work.
-        # The stats command will translate these into descriptive text!
-        self.db.strength = 14       # great
-        self.db.agility = 13        # very good
-        self.db.constitution = 10   # impacts maximum HP scaling
-        self.db.charisma = 8        # slightly below average
-        self.db.empathy = 8         # slightly below average
-        self.db.judgement = 13      # very good
-        self.db.perception = 11     # slightly above average
-        self.db.speed = 16          # outstanding
-        self.db.willpower = 10      # good
-        self.db.appearance = 9      # average
-        self.db.dexterity = 15      # remarkable
-        self.db.endurance = 16      # outstanding
-        self.db.memory = 10         # good
-        self.db.reasoning = 14      # great
+        # 3. Attributes
+        for attr in ["strength", "agility", "constitution", "charisma", "empathy", 
+                     "judgement", "perception", "speed", "willpower", "appearance", 
+                     "dexterity", "endurance", "memory", "reasoning"]:
+            setattr(self.db, attr, 100)
         
         # 4. Vitality & Status
         self.db.hp = 197
         self.db.hp_max = 197
         self.db.stamina = 50
         self.db.stamina_max = 50
-        self.db.fatigue_pct = 19    # Saved as % depleted or % remaining. We'll map to your layout!
+        self.db.fatigue_pct = 19
         self.db.state = "conscious"
         self.db.position = "standing"
         self.db.load_lbs = 112
@@ -59,26 +56,37 @@ class Character(DefaultCharacter):
         # 5. Skill Mastery Tracking
         self.db.skills = {
             "Unarmed": {"level": 1, "xp": 0, "xp_needed": 100},
-            "Dagger": {"level": 1, "xp": 0, "xp_needed": 100},
-            "Sword": {"level": 1, "xp": 0, "xp_needed": 100},
-            "Axe": {"level": 1, "xp": 0, "xp_needed": 100}
+            "Knives": {"level": 1, "xp": 0, "xp_needed": 100},
+            "One Handed Crushing": {"level": 1, "xp": 0, "xp_needed": 100}
         }
 
+    def at_cmdset_get(self, **kwargs):
+        super().at_cmdset_get(**kwargs)
+        # Add GameMasterCmdSet if the character has the Gamemaster permission
+        if self.locks.check_lockstring(self, "perm(Gamemaster)"):
+            self.cmdset.add(GameMasterCmdSet, permanent=True)
+        # Add other command sets here as needed for Storyteller, WelcomeArea, PlayerCharacter, etc.
         # 6. Combat Variables
-        self.db.combat_speed = 3       
-        self.db.combat_cooldown = 0     
-        self.db.queued_action = None    
+        self.db.combat_speed = 3        
+        self.db.combat_cooldown = 0    
+        self.db.action_sequence = []
+        self.db.action_loop = False
+        self.db.current_target = None
         self.db.slots = {"main_hand": None}
 
-    def train_skill(self, skill_name, amount):
-        """ Adds experience to a specified weapon mastery category and checks for level ups. """
-        skills = self.db.skills
-        if not skills or skill_name not in skills:
-            return
+    def get_combat_stats(self):
+        p, e, d, s, sp, a = (self.db.perception or 100), (self.db.empathy or 100), \
+                            (self.db.dexterity or 100), (self.db.strength or 100), \
+                            (self.db.speed or 100), (self.db.agility or 100)
+        aim = min(((p / 4) + (e / 4) + (d / 2)), 200) + (s / 10)
+        dodge = (sp / 4) + (a / 2)
+        return aim, dodge
 
+    def train_skill(self, skill_name, amount):
+        skills = self.db.skills or {}
+        if skill_name not in skills: return
         skill = skills[skill_name]
         skill["xp"] += amount
-
         if skill["xp"] >= skill["xp_needed"]:
             skill["xp"] -= skill["xp_needed"]
             skill["level"] += 1
@@ -86,100 +94,83 @@ class Character(DefaultCharacter):
             self.msg(f"\n|G* Your proficiency grows! Mastery in [{skill_name}] has increased to Level {skill['level']}! *|n\n")
         else:
             self.msg(f"|g[Skill Gain: +{amount} {skill_name} XP ({skill['xp']}/{skill['xp_needed']})]|n")
-
         self.db.skills = skills
 
-    def queue_action(self, action_type, target):
-        """ Main player combat queue entry point. """
-        if not target or target.location != self.location:
-            self.msg("Your target is no longer here.")
-            self.db.queued_action = None
-            return
+    def queue_action(self, action_string, target):
+        actions = [a.strip().lower() for a in action_string.split(",")]
+        loop = "*" in actions
+        if loop: actions.remove("*")
+        self.db.original_sequence = list(actions)
+        self.db.action_sequence = list(actions)
+        self.db.action_loop = loop
+        self.db.current_target = target
+        self.msg(f"|gQueued sequence: {', '.join(actions)}{' (Looping)' if loop else ''}|n")
+        self.process_next_action()
 
-        speed_cost = self.db.combat_speed
-        weapon = self.db.slots.get("main_hand")
-        if weapon and hasattr(weapon, "db") and weapon.db.speed_cost:
-            speed_cost = weapon.db.speed_cost
+    def process_next_action(self):
+        if not self.db.action_sequence:
+            if self.db.action_loop and self.db.original_sequence:
+                self.db.action_sequence = list(self.db.original_sequence)
+            else:
+                self.db.current_target = None
+                return
+        if (self.db.combat_cooldown or 0) > 0: return
 
-        current_cooldown = self.attributes.get("combat_cooldown") or 0
-
-        if current_cooldown == 0:
+        action_type = self.db.action_sequence.pop(0)
+        target = self.db.current_target
+        if target and target.location == self.location:
             self.execute_action(action_type, target)
-            self.attributes.add("combat_cooldown", int(speed_cost))
-            return
-
-        old_action = self.db.queued_action
-        self.db.queued_action = (action_type, target)
-
-        if old_action:
-            old_type, _ = old_action
-            self.msg(f"|yChanged your mind. Switched from {old_type} to {action_type} on {target.key}.|n")
         else:
-            self.msg(f"|gQueued up a {action_type} on {target.key}. ({current_cooldown} ticks remaining)|n")
+            self.msg("Target lost. Ending sequence.")
+            self.db.action_sequence = []
+            self.db.action_loop = False
 
     def combat_tick(self):
-        """ Processed by the global server heartbeat script. """
         cooldown = self.attributes.get("combat_cooldown") or 0
         if cooldown > 0:
             cooldown -= 1
             self.attributes.add("combat_cooldown", int(cooldown))
-            
             if cooldown == 0:
-                if self.db.queued_action:
-                    action_type, target = self.db.queued_action
-                    
-                    if target and target.location == self.location:
-                        self.execute_action(action_type, target)
-                        
-                        weapon = self.db.slots.get("main_hand")
-                        speed_cost = weapon.db.speed_cost if (weapon and weapon.db.speed_cost) else self.db.combat_speed
-                        self.attributes.add("combat_cooldown", int(speed_cost))
-                    else:
-                        self.msg("Your target is gone. Action canceled.")
-                        
-                    self.db.queued_action = None
-                else:
-                    self.msg("|gYou are ready for your next move!|n")
+                self.msg("|gYou are no longer busy.|n")
+                self.process_next_action()
 
     def execute_action(self, action_type, target):
-        """Calculate damage and directly reward weapon proficiency skill XP."""
-        damage = self.db.strength // 2
+        aim, _ = self.get_combat_stats()
+        _, target_dodge = target.get_combat_stats() if hasattr(target, "get_combat_stats") else (0, 75)
+        target_difficulty = max(5, min(95, 50 - (aim - target_dodge)))
+        roll = random.randint(1, 100)
+        self.msg(f"|c[Success: {target_difficulty:.1f}, Roll: {roll}]|n")
+        
+        if roll <= target_difficulty:
+            self.msg(f"|yYou try to {action_type} {target.key}, but you miss!|n")
+            target.msg(f"|y{self.key} tries to {action_type} you, but misses!|n")
+        else:
+            damage = self.db.strength // 2
+            weapon = self.db.slots.get("main_hand")
+            weapon_type = "Unarmed"
+            if weapon and hasattr(weapon, "db"):
+                if weapon.db.damage: damage += weapon.db.damage
+                if weapon.db.weapon_type: weapon_type = weapon.db.weapon_type
+            
+            skill_level = (self.db.skills or {}).get(weapon_type, {}).get("level", 1)
+            damage = int(damage * (1.0 + ((skill_level - 1) * 0.05)))
+
+            if action_type == "stab": damage = int(damage * 0.9)
+            elif action_type in ["slash", "smash", "bash"]: damage = int(damage * 1.2)
+            
+            self.msg(f"|wYou perform {action_type} on {target.key}!|n")
+            if hasattr(target, "at_damage"): target.at_damage(damage, self)
+            elif hasattr(target, "db"): 
+                target.db.hp -= damage
+            self.train_skill(weapon_type, 15)
+
         weapon = self.db.slots.get("main_hand")
-        weapon_type = "Unarmed"
-        
-        if weapon and hasattr(weapon, "db"):
-            if weapon.db.damage:
-                damage += weapon.db.damage
-            if weapon.db.weapon_type:
-                weapon_type = weapon.db.weapon_type
-
-        skill_level = 1
-        if self.db.skills and weapon_type in self.db.skills:
-            skill_level = self.db.skills[weapon_type]["level"]
-        
-        mastery_modifier = 1.0 + ((skill_level - 1) * 0.05)
-        damage = int(damage * mastery_modifier)
-
-        if action_type == "stab":
-            damage = int(damage * 0.9)
-            self.msg(f"|wYou lunge forward and STAB {target.key}!|n")
-            target.msg(f"|r{self.key} lunges forward and stabs you!|n")
-        elif action_type == "slash":
-            damage = int(damage * 1.3)
-            self.msg(f"|wYou swing wide and SLASH {target.key}!|n")
-            target.msg(f"|r{self.key} swings wide and slashes you!|n")
-
-        if hasattr(target, "at_damage"):
-            target.at_damage(damage, self)
-        elif hasattr(target, "db") and "hp" in target.db.all():
-            target.db.hp -= damage
-            if target.db.hp <= 0:
-                self.msg(f"You have defeated {target.key}!")
-
-        self.train_skill(weapon_type, 15)
+        speed_cost = weapon.db.speed_cost if (weapon and hasattr(weapon, "db") and weapon.db.speed_cost) else self.db.combat_speed
+        self.attributes.add("combat_cooldown", int(speed_cost))
+        if speed_cost > 0:
+            self.msg(f"|yYou will be busy for {speed_cost} more second(s).|n")
 
     def at_damage(self, amount, attacker):
-        """Called when this character takes damage."""
         self.db.hp -= amount
         self.msg(f"|rYou take {amount} damage! (HP: {self.db.hp}/{self.db.hp_max})|n")
         if self.db.hp <= 0:
