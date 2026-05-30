@@ -23,6 +23,7 @@ several more options for customizing the Guest account system.
 """
 
 from evennia.accounts.accounts import DefaultAccount, DefaultGuest
+from evennia import search_object
 
 
 class Account(DefaultAccount):
@@ -136,7 +137,27 @@ class Account(DefaultAccount):
 
     """
 
-    pass
+    def at_account_creation(self):
+        super().at_account_creation()
+
+        # WA-only permission baseline for new accounts
+        self.permissions.clear()
+        self.permissions.add("WAaccount")
+
+        # WA menu character registry
+        if self.db.wa_characters is None:
+            self.db.wa_characters = []
+
+        # Welcome Area room reference (#19)
+        room = search_object("#19")
+        self.db.wa_start_room = room[0] if room else None
+
+    def at_post_login(self, session=None, **kwargs):
+        super().at_post_login(session=session, **kwargs)
+        # Keep WAaccount baseline if account is not staff/superuser
+        if not self.is_superuser and not self.check_permstring("Developer"):
+            self.permissions.clear()
+            self.permissions.add("WAaccount")
 
 
 class Guest(DefaultGuest):

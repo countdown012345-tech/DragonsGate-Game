@@ -32,7 +32,10 @@ from evennia.settings_default import *
 ######################################################################
 
 # This is the name of your game. Make it catchy!
-SERVERNAME = "dragonsgate"
+SERVERNAME = "TEC Classic"
+
+# Spawn newly-puppeted characters into Welcome Area room (#19) by default.
+START_LOCATION = "#19"
 
 
 ######################################################################

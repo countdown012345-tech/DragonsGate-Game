@@ -9,6 +9,7 @@ from evennia import CmdSet
 from commands.command import CmdStats, CmdQueue, CmdStop  # Ensure CmdQueue is imported from your command.py
 from commands.worldbuilder import CmdWorldbuilder
 from commands.cmd_door import CmdOpen, CmdClose
+from commands.wa_commands import CmdWAMenu, CmdSleep
 class GameMasterCmdSet(CmdSet):
     """Command set for GameMasters."""
     key = "GameMasterCmdSet"
@@ -181,12 +182,14 @@ class CharacterCmdSet(default_cmds.CharacterCmdSet):
         # Add the new sequence queuing command
         self.add(CmdQueue())
         self.add(CmdStop())
+        self.add(CmdSleep())
 
 
 class AccountCmdSet(default_cmds.AccountCmdSet):
     key = "DefaultAccount"
     def at_cmdset_creation(self):
         super().at_cmdset_creation()
+        self.add(CmdWAMenu())
 
 
 class UnloggedinCmdSet(default_cmds.UnloggedinCmdSet):
